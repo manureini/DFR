@@ -184,12 +184,14 @@ class TestDataset(Dataset):
             img = self.transform(img)
         img_name = self.img_files[idx]
 
+        img_name = img_name.replace("\\", "/")
+        print(img_name)
         # mask
         # h, w, _ = img.shape
         if img_name.split('/')[-2] == "good":
             mask = np.zeros((256, 256))
         else:
-            if "wine" in self.img_files[idx]:
+            if "wine" in img_name:
                 mask_path = img_name.replace("test", "ground_truth").split(".")[-2] + ".png"
                 mask = imread(mask_path, as_gray=True)
                 mask = resize(mask, (256, 256))
@@ -212,9 +214,11 @@ class TestDataset(Dataset):
 
 # np.pad()
 
-# ---------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------
+# #
 # For supervised learning and performance boundary analysis.
-# ---------------------------------------------------------------------------- #
+# ----------------------------------------------------------------------------
+# #
 
 # for sklearn ann (one-shot)
 class ValTestDataset(Dataset):
@@ -226,8 +230,8 @@ class ValTestDataset(Dataset):
 
         np.random.seed(self.seed)
         idx = np.random.permutation(range(self.len))
-        val_idx = idx[:int(self.len*val_size)]
-        test_idx = idx[int(self.len*val_size):]
+        val_idx = idx[:int(self.len * val_size)]
+        test_idx = idx[int(self.len * val_size):]
 
         if val:
             self.img_files = np.array(self.total_img_files)[val_idx].tolist()
@@ -291,8 +295,8 @@ class TrainTestDataset(Dataset):
 
         np.random.seed(self.seed)
         idx = np.random.permutation(range(self.len))
-        val_idx = idx[:int(self.len*train_size)]
-        test_idx = idx[int(self.len*train_size):]
+        val_idx = idx[:int(self.len * train_size)]
+        test_idx = idx[int(self.len * train_size):]
         # print("val idx", val_idx)
         if is_train:
             self.img_files = np.array(self.total_img_files)[val_idx].tolist()
@@ -307,8 +311,10 @@ class TrainTestDataset(Dataset):
         # transformer
         # t_normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
         #                                  std=[0.229, 0.224, 0.225])
-        # t_resize = transforms.Resize(size=(256, 256), interpolation=Image.NEAREST)
-        # self.transform = transforms.Compose([t_resize, transforms.ToTensor(), t_normalize])
+        # t_resize = transforms.Resize(size=(256, 256),
+        # interpolation=Image.NEAREST)
+        # self.transform = transforms.Compose([t_resize, transforms.ToTensor(),
+        # t_normalize])
         # transformer
         t_resize = transforms.Resize(size=(256, 256), interpolation=Image.NEAREST)
         if normalize:
@@ -397,7 +403,7 @@ def build_dataset_from_featmap(x, mask=None, ksize=5, stride=5, agg_type='avg', 
 
 if __name__ == "__main__":
     data_name = "bottle"
-    train_data_path = "/home/jovyan/work/dataset/MVAomaly/"+ data_name + "/train"
+    train_data_path = "/home/jovyan/work/dataset/MVAomaly/" + data_name + "/train"
     test_data_path = "/home/jovyan/work/dataset/MVAomaly/" + data_name + "/test"
     train_data = NormalDataset(path=train_data_path)
     test_data = TestDataset(path=test_data_path)
