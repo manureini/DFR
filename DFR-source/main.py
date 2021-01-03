@@ -19,7 +19,11 @@ def config():
     # parameters for the regional feature generator
     parser.add_argument('--backbone', type=str, default="vgg19", help="backbone net")
 
-    cnn_layers = ('relu4_1', 'relu4_2', 'relu4_3', 'relu4_4')
+    #cnn_layers = ('relu4_1', 'relu4_2', 'relu4_3', 'relu4_4')
+    cnn_layers = ('relu1_1', 'relu1_2', 'relu2_1', 'relu2_2',
+                  'relu3_1', 'relu3_2', 'relu3_3', 'relu3_4',
+                  'relu4_1', 'relu4_2', 'relu4_3', 'relu4_4')
+
     parser.add_argument('--cnn_layers', type=str, nargs="+", default=cnn_layers, help="cnn feature layers to use")
     parser.add_argument('--upsample', type=str, default="bilinear", help="operation for resizing cnn map")
     parser.add_argument('--is_agg', type=bool, default=True, help="if to aggregate the features")
@@ -59,30 +63,10 @@ if __name__ == "__main__":
     #    On the whole data
     #########################################
     cfg = config()
-    cfg.save_path = "/home/jie/Python-Workspace/Pycharm-Projects/Anomaly-2020/DFR-Baseline"
-    # cfg.model_name = ""
-
-    # feature extractor
-#     cfg.cnn_layers = ('relu4_1', 'relu4_2', 'relu4_3', 'relu4_4')
-    cfg.cnn_layers = ('relu1_1', 'relu1_2', 'relu2_1', 'relu2_2',
-                  'relu3_1', 'relu3_2', 'relu3_3', 'relu3_4',
-                  'relu4_1', 'relu4_2', 'relu4_3', 'relu4_4')
-
-    # dataset
-    textures = ['carpet', 'grid', 'leather', 'tile', 'wood']
-    objects = ['bottle','cable', 'capsule','hazelnut', 'metal_nut',
-               'pill', 'screw', 'toothbrush', 'transistor', 'zipper'] 
-    data_names = objects + textures
-
-    # train or evaluation
-    for data_name in data_names:
-        cfg.data_name = data_name
-        cfg.train_data_path = "/home/jie/Datasets/MVAomaly/" + data_name + "/train/good"
-        cfg.test_data_path = "/home/jie/Datasets/MVAomaly/" + data_name + "/test"
-
-        dfr = AnoSegDFR(cfg)
-        if cfg.mode == "train":
-            dfr.train()
-        else:
-            dfr.metrics_evaluation()
+        
+    dfr = AnoSegDFR(cfg)
+    if cfg.mode == "train":
+        dfr.train()
+    else:
+        dfr.metrics_evaluation()
 #             dfr.metrics_detecion()
