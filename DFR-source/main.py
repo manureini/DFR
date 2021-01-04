@@ -69,4 +69,5 @@ if __name__ == "__main__":
         dfr.train()
     else:
         dfr.metrics_evaluation()
-#             dfr.metrics_detecion()
+        dfr.segmentation_evaluation()
+        dfr.metrics_detecion()
