@@ -1,0 +1,8 @@
+torch
+matplotlib
+scikit-image
+pandas
+joblib
+sklearn
+opencv-python
+torchvision
