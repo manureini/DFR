@@ -101,7 +101,7 @@ class AnoSegDFR():
             # to numpy
             feats = feats.detach().numpy()
             # estimate parameters for mlp
-            pca = PCA(n_components=0.90)    # 0.9 here try 0.8
+            pca = PCA(n_components=self.cfg.ae_pca_factor)    # 0.9 here try 0.8
             pca.fit(feats)
             n_dim, in_feat = pca.components_.shape
             print("AE Parameter (in_feat, n_dim): ({}, {})".format(in_feat, n_dim))

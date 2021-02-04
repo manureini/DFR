@@ -48,6 +48,7 @@ def config():
     parser.add_argument('--batch_size', type=int, default=4, help="batch size for training")
     parser.add_argument('--lr', type=float, default=1e-4, help="learning rate")
     parser.add_argument('--epochs', type=int, default=150, help="epochs for training")    # default 700, for wine 150
+    parser.add_argument('--ae_pca_factor', type=float, default=0.9, help="Factor for PCA") 
 
     # segmentation evaluation
     parser.add_argument('--thred', type=float, default=0.5, help="threshold for segmentation")
