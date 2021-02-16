@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchsummary import summary
 #from extractors.feature import Extractor
 from feature import Extractor
 from torch.utils.data import DataLoader
 import torch.optim as optim
 #from data.MVTec import NormalDataset, TrainTestDataset
-
 import time
 import datetime
 import os
@@ -24,6 +24,7 @@ from sklearn.decomposition import PCA
 
 from utils import *
 
+import adabound
 
 class AnoSegDFR():
     """
@@ -43,6 +44,7 @@ class AnoSegDFR():
         self.img_size = cfg.img_size
         self.threshold = cfg.thred
         self.device = torch.device(cfg.device)
+        self.device_count = torch.cuda.device_count()
 
         # feature extractor
         self.extractor = Extractor(backbone=cfg.backbone,
@@ -75,7 +77,9 @@ class AnoSegDFR():
 
         # optimizer
         self.lr = cfg.lr
-        self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=self.lr, weight_decay=0)
+      #  self.optimizer = optim.Adam(self.autoencoder.parameters(), lr=self.lr,
+      #  weight_decay=0)
+        self.optimizer = adabound.AdaBound(self.autoencoder.parameters(), lr=self.lr, final_lr=0.1)
 
         # saving paths
         self.subpath = self.data_name + "/" + self.model_name
@@ -117,6 +121,13 @@ class AnoSegDFR():
 
         print("BN?:", self.cfg.is_bn)
         autoencoder = FeatCAE(in_channels=in_feat, latent_dim=self.n_dim, is_bn=self.cfg.is_bn).to(self.device)
+        summary(autoencoder, (in_feat, 1, 1))  # 2, 1, 1, 3456
+
+        if self.device_count > 1:
+            print("Let's use", self.device_count, "GPUs!")
+            autoencoder = nn.DataParallel(autoencoder)
+#            summary(autoencoder, (in_feat, 1, 1)) # 2, 1, 1, 3456
+
         model_name = "AnoSegDFR({})_{}_l{}_d{}_s{}_k{}_{}".format('BN' if self.cfg.is_bn else 'noBN',
                                                                 self.cfg.backbone, self.n_layers,
                                                                 self.n_dim, self.cfg.stride[0],
@@ -144,7 +155,7 @@ class AnoSegDFR():
         # train
         iters_per_epoch = len(self.train_data_loader)  # total iterations every epoch
         epochs = self.cfg.epochs  # total epochs
-        for epoch in range(1, epochs+1):
+        for epoch in range(1, epochs + 1):
             self.extractor.train()
             self.autoencoder.train()
             losses = []
@@ -166,16 +177,14 @@ class AnoSegDFR():
                 print('Epoch {}/{}'.format(epoch, epochs))
                 print('-' * 10)
                 elapsed = time.time() - start_time
-                total_time = ((epochs * iters_per_epoch) - (epoch * iters_per_epoch + i)) * elapsed / (
-                        epoch * iters_per_epoch + i + 1)
+                total_time = ((epochs * iters_per_epoch) - (epoch * iters_per_epoch + i)) * elapsed / (epoch * iters_per_epoch + i + 1)
                 epoch_time = (iters_per_epoch - i) * elapsed / (epoch * iters_per_epoch + i + 1)
 
                 epoch_time = str(datetime.timedelta(seconds=epoch_time))
                 total_time = str(datetime.timedelta(seconds=total_time))
                 elapsed = str(datetime.timedelta(seconds=elapsed))
 
-                log = "Elapsed {}/{} -- {} , Epoch [{}/{}], Iter [{}/{}]".format(
-                    elapsed, epoch_time, total_time, epoch, epochs, i + 1, iters_per_epoch)
+                log = "Elapsed {}/{} -- {} , Epoch [{}/{}], Iter [{}/{}]".format(elapsed, epoch_time, total_time, epoch, epochs, i + 1, iters_per_epoch)
 
                 for tag, value in loss.items():
                     log += ", {}: {:.4f}".format(tag, value)
@@ -214,9 +223,11 @@ class AnoSegDFR():
 
         # print(input_data.size())
         dec = self.autoencoder(input_data)
-
-        # loss
-        total_loss = self.autoencoder.loss_function(dec, input_data.detach().data)
+              
+        if self.device_count > 1:
+            total_loss = self.autoencoder.module.loss_function(dec, input_data.detach().data)
+        else:
+            total_loss = self.autoencoder.loss_function(dec, input_data.detach().data)
 
         # self.reset_grad()
         total_loss.backward()
@@ -237,9 +248,12 @@ class AnoSegDFR():
 
         input = self.extractor(input)
         dec = self.autoencoder(input)
+        
+        if self.device_count > 1:
+            scores = self.autoencoder.module.compute_energy(dec, input)
+        else:
+            scores = self.autoencoder.compute_energy(dec, input)
 
-        # sample energy
-        scores = self.autoencoder.compute_energy(dec, input)
         scores = scores.reshape((1, 1, self.extractor.out_size[0], self.extractor.out_size[1]))    # test batch size is 1.
         scores = nn.functional.interpolate(scores, size=self.img_size, mode="bilinear", align_corners=True).squeeze()
         # print("score shape:", scores.shape)
@@ -292,7 +306,7 @@ class AnoSegDFR():
             if name.split("/")[-2] != "good":
                 specificity, sensitivity, accuracy, coverage, auc = spec_sensi_acc_iou_auc(mask, binary_scores, scores)
                 metrics.append([specificity, sensitivity, accuracy, coverage, auc])
-            print("Batch {},".format(i), "Cost total time {}s".format(time.time()-time_start))
+            print("Batch {},".format(i), "Cost total time {}s".format(time.time() - time_start))
         # metrics over all data
         metrics = np.array(metrics)
         metrics_mean = metrics.mean(axis=0)
@@ -304,23 +318,23 @@ class AnoSegDFR():
 
     def save_paths(self):
         # generating saving paths
-        score_map_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/score_map")
+        score_map_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/score_map")
         if not os.path.exists(score_map_path):
             os.makedirs(score_map_path)
 
-        binary_score_map_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/binary_score_map")
+        binary_score_map_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/binary_score_map")
         if not os.path.exists(binary_score_map_path):
             os.makedirs(binary_score_map_path)
 
-        gt_pred_map_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/gt_pred_score_map")
+        gt_pred_map_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/gt_pred_score_map")
         if not os.path.exists(gt_pred_map_path):
             os.makedirs(gt_pred_map_path)
 
-        mask_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/mask")
+        mask_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/mask")
         if not os.path.exists(mask_path):
             os.makedirs(mask_path)
 
-        gt_pred_seg_image_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/gt_pred_seg_image")
+        gt_pred_seg_image_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/gt_pred_seg_image")
         if not os.path.exists(gt_pred_seg_image_path):
             os.makedirs(gt_pred_seg_image_path)
 
@@ -341,7 +355,8 @@ class AnoSegDFR():
         imsave(os.path.join(mask_path, "{}".format(img_name)), mask)
 
         # # pred vs gt map
-        # imsave(os.path.join(gt_pred_score_map, "{}".format(img_name)), normalize(binary_scores + mask))
+        # imsave(os.path.join(gt_pred_score_map, "{}".format(img_name)),
+        # normalize(binary_scores + mask))
         visulization_score(img_file=name, mask_path=mask_path,
                      score_map_path=score_map_path, saving_path=gt_pred_score_map)
         # pred vs gt image
@@ -389,7 +404,7 @@ class AnoSegDFR():
     ########################################################
     def segmentation_results(self):
         def normalize(x):
-            return x/x.max()
+            return x / x.max()
 
         time_start = time.time()
         for i, (img, mask, name) in enumerate(self.test_data_loader):    # batch size is 1.
@@ -404,23 +419,24 @@ class AnoSegDFR():
             # save results
             if name[0].split("/")[-2] != "good":
                 self.save_seg_results(normalize(scores), binary_scores, mask, name)
-            # self.save_seg_results((scores-score_min)/score_range, binary_scores, mask, name)
-            print("Batch {},".format(i), "Cost total time {}s".format(time.time()-time_start))
+            # self.save_seg_results((scores-score_min)/score_range,
+            # binary_scores, mask, name)
+            print("Batch {},".format(i), "Cost total time {}s".format(time.time() - time_start))
 
     ######################################################
     #  Evaluation of segmentation
     ######################################################
     def save_segment_paths(self, fpr):
         # generating saving paths
-        binary_score_map_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/fpr_{}/binary_score_map".format(fpr))
+        binary_score_map_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/fpr_{}/binary_score_map".format(fpr))
         if not os.path.exists(binary_score_map_path):
             os.makedirs(binary_score_map_path)
 
-        mask_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/fpr_{}/mask".format(fpr))
+        mask_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/fpr_{}/mask".format(fpr))
         if not os.path.exists(mask_path):
             os.makedirs(mask_path)
 
-        gt_pred_seg_image_path = os.path.join(self.cfg.save_path+"/Results", self.subpath + "/fpr_{}/gt_pred_seg_image".format(fpr))
+        gt_pred_seg_image_path = os.path.join(self.cfg.save_path + "/Results", self.subpath + "/fpr_{}/gt_pred_seg_image".format(fpr))
         if not os.path.exists(gt_pred_seg_image_path):
             os.makedirs(gt_pred_seg_image_path)
 
@@ -466,8 +482,7 @@ class AnoSegDFR():
 
             # estimate the optimal threshold base on user defined min_area
             fpr = binary_score_maps.sum() / binary_score_maps.size
-            print(
-                "threshold {}: find fpr {} / user defined fpr {}".format(threshold, fpr, expect_fpr))
+            print("threshold {}: find fpr {} / user defined fpr {}".format(threshold, fpr, expect_fpr))
             if fpr >= expect_fpr:  # find the optimal threshold
                 print("find optimal threshold:", threshold)
                 print("Done.\n")
@@ -493,7 +508,7 @@ class AnoSegDFR():
             name = name[0]
             # save results
             self.save_segment_results(binary_scores, mask, name, expect_fpr)
-            print("Batch {},".format(i), "Cost total time {}s".format(time.time()-time_start))
+            print("Batch {},".format(i), "Cost total time {}s".format(time.time() - time_start))
         print("threshold:", thred)
 
     def segment_evaluation_with_otsu_li(self, seg_method='otsu'):
@@ -527,7 +542,7 @@ class AnoSegDFR():
             name = name[0]
             # save results
             self.save_segment_results(binary_scores, mask, name, seg_method)
-            print("Batch {},".format(i), "Cost total time {}s".format(time.time()-time_start))
+            print("Batch {},".format(i), "Cost total time {}s".format(time.time() - time_start))
         print("threshold:", thred)
 
     def segmentation_evaluation(self):
@@ -601,7 +616,8 @@ class AnoSegDFR():
 
             masks.append(mask)
             scores.append(anomaly_map)
-            #print("Batch {},".format(i), "Cost total time {}s".format(time.time() - time_start))
+            #print("Batch {},".format(i), "Cost total time
+            #{}s".format(time.time() - time_start))
 
         # as array
         masks = np.array(masks)
@@ -646,16 +662,19 @@ class AnoSegDFR():
 
             pro = []    # per region overlap
             iou = []    # per image iou
-            # pro: find each connected gt region, compute the overlapped pixels between the gt region and predicted region
-            # iou: for each image, compute the ratio, i.e. intersection/union between the gt and predicted binary map 
+            # pro: find each connected gt region, compute the overlapped pixels
+                                # between the gt region and predicted region
+                                                    # iou: for each image, compute the ratio, i.e.
+                                                    # intersection/union
+                                                    # between the gt and predicted binary map
             for i in range(len(binary_score_maps)):    # for i th image
                 # pro (per region level)
                 label_map = measure.label(masks[i], connectivity=2)
                 props = measure.regionprops(label_map)
                 for prop in props:
-                    x_min, y_min, x_max, y_max = prop.bbox    # find the bounding box of an anomaly region 
+                    x_min, y_min, x_max, y_max = prop.bbox    # find the bounding box of an anomaly region
                     cropped_pred_label = binary_score_maps[i][x_min:x_max, y_min:y_max]
-                    # cropped_mask = masks[i][x_min:x_max, y_min:y_max]   # bug!
+                    # cropped_mask = masks[i][x_min:x_max, y_min:y_max] # bug!
                     cropped_mask = prop.filled_image    # corrected!
                     intersection = np.logical_and(cropped_pred_label, cropped_mask).astype(np.float32).sum()
                     pro.append(intersection / prop.area)
@@ -704,7 +723,7 @@ class AnoSegDFR():
         fprs_selected = rescale(fprs_selected)    # rescale fpr [0,0.3] -> [0, 1]
         pros_mean_selected = pros_mean[idx]    
         pro_auc_score = auc(fprs_selected, pros_mean_selected)
-        print("pro auc ({}% FPR):".format(int(expect_fpr*100)), pro_auc_score)
+        print("pro auc ({}% FPR):".format(int(expect_fpr * 100)), pro_auc_score)
 
         # save results
         data = np.vstack([threds[idx], fprs[idx], pros_mean[idx], pros_std[idx]])
@@ -745,7 +764,8 @@ class AnoSegDFR():
 
             masks.append(mask)
             scores.append(anomaly_map)
-            #print("Batch {},".format(i), "Cost total time {}s".format(time.time() - time_start))
+            #print("Batch {},".format(i), "Cost total time
+            #{}s".format(time.time() - time_start))
 
         # as array
         masks = np.array(masks)
