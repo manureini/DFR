@@ -6,7 +6,4 @@ joblib
 sklearn
 opencv-python
 torchvision
-cudatoolkit
-pytorch
-tqdm
 torchsummary
