@@ -71,7 +71,7 @@ import torch.nn as nn
 class FeatCAE(nn.Module):
     """Autoencoder."""
 
-    def __init__(self, in_channels = 1000, latent_dim = 50):
+    def __init__(self, in_channels=1000, latent_dim=50, is_bn=True):
         super(FeatCAE, self).__init__()
 
         layers = []
@@ -119,7 +119,6 @@ class FeatCAE(nn.Module):
 ################################################
 # Feature AE with Shuffle Group Convolution
 ################################################
-
 def channel_shuffle(x, groups):
     batchsize, num_channels, height, width = x.data.size()
 
