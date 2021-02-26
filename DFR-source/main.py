@@ -68,7 +68,7 @@ if __name__ == "__main__":
     dfr = AnoSegDFR(cfg)
     if cfg.mode == "train":
         dfr.train()
-    else:
-        dfr.metrics_evaluation()
-        dfr.segmentation_evaluation()
-        dfr.metrics_detecion()
+    
+    dfr.metrics_evaluation()
+    dfr.segmentation_evaluation()
+    dfr.metrics_detecion()
